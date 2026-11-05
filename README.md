@@ -1,4 +1,4 @@
-# autojetsonbot-learning
+# camera-only-docking
 
 Teleop demonstrations → LeRobot dataset → learned policy → on-robot deployment and paired
 trials, on a real low-cost robot: [autoJetsonBot](https://github.com/jakhon37/autoJetsonBot)
@@ -122,7 +122,7 @@ container cannot open the CSI camera: recreate it once with `--runtime nvidia -v
 /tmp/argus_socket:/tmp/argus_socket` and check it (PROTOCOL section 4). Then:
 
 ```bash
-cd /autonomous_ROS/autojetsonbot-learning/ros2_ws && colcon build --symlink-install
+cd /autonomous_ROS/camera-only-docking/ros2_ws && colcon build --symlink-install
 source install/setup.bash
 bash ../scripts/record_robot.sh    # camera check, then camera, gate, judge, logger + bag in data/robot/
 ```
@@ -145,7 +145,7 @@ this, so verify it (PROTOCOL section 4) before anything drives on its own.
 Copy the recordings off the robot first (the container writes them world-readable):
 
 ```bash
-rsync -av <jetson>:<autoJetsonBot checkout>/autojetsonbot-learning/data/robot/ data/robot/
+rsync -av <jetson>:<autoJetsonBot checkout>/camera-only-docking/data/robot/ data/robot/
 ```
 
 ```bash

@@ -1,6 +1,6 @@
 """Real robot, demonstrations: camera + safety gate + judge + trial logger (+ bag).
 
-    D=/autonomous_ROS/autojetsonbot-learning/data/robot
+    D=/autonomous_ROS/camera-only-docking/data/robot
     ros2 launch jbl_nodes robot_record.launch.py bag:=$D/bags/demos_$(date +%Y%m%d_%H%M) \
         trials_csv:=$D/trials/$(date +%Y-%m-%d)/demos.csv
 

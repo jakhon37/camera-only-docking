@@ -14,7 +14,7 @@
 # everything and closes the bag. Teleop and the episode CLI run in other terminals (printed below).
 #
 # Data goes to $DATA_DIR [<this checkout>/data/robot]: inside autoJetsonBot's container the
-# checkout is /autonomous_ROS/autojetsonbot-learning, on the bind mount, so the bags survive the
+# checkout is /autonomous_ROS/camera-only-docking, on the bind mount, so the bags survive the
 # container and appear on the Jetson host (copy them off with rsync, README "Training"). $HOME
 # (/root) inside the container is neither persistent nor visible on the host.
 #

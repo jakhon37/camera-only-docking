@@ -157,3 +157,11 @@ analysis output changed; the edits below are to the text only.
   to the Exploratory section of `SUMMARY.md`, one line pointing to it; no existing text of
   `SUMMARY.md` changed, and no number or verdict changed. `SUMMARY.md` sha256 after that edit:
   `ff0f6ec9db2083ab7a70d02984ff87150041ff948c8e1bcd6d45e987e0663642`.
+
+## Repository move
+
+- 2026-11-05: the repository was re-created as `jakhon37/camera-only-docking` with the same
+  commits, to replace `jakhon37/autojetsonbot-learning`, whose GitHub contributor list kept a
+  stale entry. The commit hashes above, including b72ba83, are unchanged. The push record of
+  b72ba83 quoted in "Setup" belongs to the old repository's activity log, so it is only visible
+  there.

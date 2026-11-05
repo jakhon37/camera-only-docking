@@ -118,7 +118,7 @@ mount; `/root` inside the container is neither persistent nor visible on the Jet
 every shell that records:
 
 ```bash
-export D=/autonomous_ROS/autojetsonbot-learning/data/robot   # bags in $D/bags, CSVs in $D/trials
+export D=/autonomous_ROS/camera-only-docking/data/robot   # bags in $D/bags, CSVs in $D/trials
 ```
 
 **Base, lidar and teleop.** Base and lidar come from the robot's own launch (`./robot.sh robot`:
@@ -479,7 +479,7 @@ Copy the robot's data to the training machine first (the container wrote it as r
 umask 022, so a normal user can read it):
 
 ```bash
-rsync -av <jetson>:<autoJetsonBot checkout>/autojetsonbot-learning/data/robot/ data/robot/
+rsync -av <jetson>:<autoJetsonBot checkout>/camera-only-docking/data/robot/ data/robot/
 python tools/analyze_trials.py data/robot/trials/2026-11-02/trials.csv \
   --schedule trials/schedule.csv --setting "real robot, on-board TensorRT" \
   --latency jetson=data/robot/bags/trials_20261102_1405 --gate data/robot/bags/trials_20261102_1405 \
