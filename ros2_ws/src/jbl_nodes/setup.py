@@ -24,6 +24,7 @@ setup(
     entry_points={
         "console_scripts": [
             "camera_node = jbl_nodes.camera_node:main",
+            "camera_check = jbl_nodes.camera_check:main",
             "dock_judge = jbl_nodes.dock_judge:main",
             "servo_baseline = jbl_nodes.servo_baseline:main",
             "policy_runner = jbl_nodes.policy_runner:main",

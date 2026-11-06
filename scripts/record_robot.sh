@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Record teleop demonstrations on autoJetsonBot (docs/PROTOCOL.md section 6).
 #
-# Run inside the robot's Foxy container (autoJetsonBot: ./robot.sh shell) after the robot's own
+# Run inside the robot's Humble container (autoJetsonBot: ./robot.sh shell) after the robot's own
 # bring-up (./robot.sh robot: diffdrive_node on /cmd_vel, the RPLidar on /scan) and after
 # building this workspace there (cd ros2_ws && colcon build --symlink-install).
 #
@@ -26,7 +26,7 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 DATA_DIR=${DATA_DIR:-$REPO/data/robot}
 BAG_DIR=${BAG_DIR:-$DATA_DIR/bags}
 TRIALS_DIR=${TRIALS_DIR:-$DATA_DIR/trials}
-MIN_FREE_GB=5  # the 15 Hz JPEG stream is about 2 GB per hour
+MIN_FREE_GB=5
 
 warn() { printf '\033[1;33m[record_robot] %s\033[0m\n' "$*" >&2; }
 die() { printf '[record_robot] error: %s\n' "$*" >&2; exit 1; }
@@ -44,7 +44,7 @@ csv=$TRIALS_DIR/$(date +%Y-%m-%d)/demos.csv
 mkdir -p "$BAG_DIR" "$(dirname "$csv")"
 
 free_gb=$(df -Pk "$BAG_DIR" | awk 'NR == 2 {print int($4 / 1048576)}')
-[ "$free_gb" -ge "$MIN_FREE_GB" ] || warn "only ${free_gb} GB free in $BAG_DIR (about 2 GB per hour of recording)"
+[ "$free_gb" -ge "$MIN_FREE_GB" ] || warn "only ${free_gb} GB free in $BAG_DIR"
 
 # Robot bring-up: someone must publish /scan and /odom, and nothing but the gate may drive /cmd_vel.
 topics=$(ros2 topic list 2>/dev/null || true)
@@ -71,9 +71,9 @@ camera_preflight() {
 import sys
 
 import yaml
-from jbl_nodes.camera_node import OpenCvSource, parse_device
+from jbl_nodes.camera_node import make_camera_source, parse_device
 
-device, size = "0", [640, 480]
+device, size, setup, timeout = "0", [640, 480], "", 2.0
 for path in sys.argv[1:]:
     if not path:
         continue
@@ -83,18 +83,21 @@ for path in sys.argv[1:]:
         values = (doc.get(section) or {}).get("ros__parameters") or {}
         device = values.get("device", device)
         size = [values.get("width", size[0]), values.get("height", size[1])]
-source = OpenCvSource(parse_device(device), int(size[0]), int(size[1]), 30.0)
+        setup = values.get("stream_setup", setup)
+        timeout = values.get("stream_timeout_s", timeout)
+source = make_camera_source(parse_device(device), int(size[0]), int(size[1]), 30.0, setup, timeout)
 print("camera check: opening %s" % source.describe())
 ok = source.open() and source.grab() and source.retrieve() is not None
+if not ok and source.last_error:
+    print("camera check: %s" % source.last_error)
 source.close()
 sys.exit(0 if ok else 1)
 PY
 }
 if [ "${SKIP_CAMERA_CHECK:-0}" != 1 ] && ! camera_preflight "$@"; then
-  die "cannot read a frame from camera_node's device. On the Nano's CSI camera the container needs
-  --runtime nvidia -v /tmp/argus_socket:/tmp/argus_socket (docs/PROTOCOL.md section 4; check with
-  gst-inspect-1.0 nvarguscamerasrc), and nothing else (camera_go.py) may hold the camera.
-  docs/INTERFACES.md, Robot facts, has the capture details."
+  die "cannot read a frame from camera_node's device. Is the ESP32-CAM on, at the address in
+  config/robot.yaml? It serves one client at a time, so close any browser open on its stream and
+  stop any other camera_node. docs/PROTOCOL.md section 4 has the details."
 fi
 
 cat <<EOF
