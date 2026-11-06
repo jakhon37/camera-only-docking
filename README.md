@@ -545,6 +545,18 @@ Last run (October 2026):
   the base images have neither package.
 - **Host.** 385 passed and 5 skipped. The skipped tests need rclpy or `sensor_msgs`.
 
+On the robot's Jetson Xavier NX (November 2026, arm64):
+
+- **The robot's own image** (`auto_ros:humble`). 303 tests, 0 failures and the same 8 skips.
+- **The official Jazzy and Foxy images.** The same. Foxy's first full run had 1 failure, when its
+  `ros2 launch` took the SIGINT in the middle of a log flush. That test then passed 10 of 10, 5 on
+  the code before these changes and 5 after, and a second full run passed.
+- **On a PC, without ROS.** The node tests in `ros2_ws/src/jbl_nodes/test`: 202 passed and 13
+  skipped. The rest of the host suite was not rerun; in `tools/`, only a comment changed.
+- **With the real camera, by hand.** `camera_check`, and `record_robot.sh` through to a closed bag.
+  A simulator bag from that image was read with `bag_to_lerobot.py`'s reader, but not converted
+  to a dataset.
+
 ## Limitations
 
 - **Simulation only so far.** `fake_robot` is a unicycle with acceleration limits, optional

@@ -22,7 +22,7 @@ camera_node:
     # agree with width and height below (QVGA = 320x240, VGA = 640x480); 10 is the firmware's default.
     stream_setup: "/resolution?size=QVGA,/fps?val=10"
     stream_timeout_s: 2.0
-    width: 320   # the dataset's own size; 640x480 is slower on this link (PROTOCOL section 4)
+    width: 320   # the dataset's own size; 640x480 is about 2.5 times the bytes per frame
     height: 240
     fps: 15.0             # both rates are caps, above the camera's 10 fps: every frame goes through
     compressed_fps: 15.0  # the recorded stream

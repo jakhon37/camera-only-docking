@@ -22,6 +22,10 @@ Checked on 2026-11-07 without driving anything. No motor has been driven under H
 | Encoders | 344–387 counts per turn by hand against 3,436 configured, and apparently one direction only (whether the second five turns were backward is unconfirmed); left jumps unexplained | `/odom` reads about 1/10 of the real speed, so the judge's 0.02 m/s "stopped" limit passes at about 0.2 m/s. `observation.state` is wrong too (ACT uses it, BC does not) |
 | Lidar | 6.5–6.9 Hz, front direction unchecked, 40% valid returns, most within 0.30 m | Calibrate `forward_angle` (section 4) and check for parts of the chassis in the scan plane |
 
+Replacement motor firmware (quadrature encoders, speed control) is on `MOTOR-ESP32S3`'s local
+`quadrature-speed-control` branch, not flashed yet. When it is, `encoder_cpr` in autoJetsonBot must
+change with it, and the Motor power and Encoders rows need checking again.
+
 The first drive needs someone present with the wheels off the ground.
 
 ## 1. Marker
