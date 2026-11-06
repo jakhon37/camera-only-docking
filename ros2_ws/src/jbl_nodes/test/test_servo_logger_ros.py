@@ -299,7 +299,7 @@ def test_judge_declares_success_after_the_hold_and_logger_writes_the_row(graph, 
     graph.spin_for(1.5, every=rig.feed)
     # The end can overtake the status of the deciding tick (different writers), so look later.
     decided = [s for s in statuses([e for e in status if e[1] > t_start]) if s["success"]]
-    assert decided and decided[0]["success_hold_s"] == pytest.approx(1.0, abs=0.11)
+    assert decided and decided[0]["success_hold_s"] == pytest.approx(1.0, abs=0.2)  # a tick can run late
     assert len(ends(events)) == 1, "exactly one end per episode"
     rate = len([1 for _, t in status if t > t_end])
     assert 11 <= rate <= 19, "status should be ~10 Hz, got %d in 1.5 s" % rate

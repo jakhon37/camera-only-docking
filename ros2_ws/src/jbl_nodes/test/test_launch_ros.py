@@ -235,6 +235,7 @@ def test_robot_policy_constant_backend_drives_through_the_gate(probe, launches, 
     assert _param(probe, "dock_judge", "hfov_rad") == (ParameterType.PARAMETER_DOUBLE, 1.0856)
     device_type, device = _param(probe, "camera_node", "device")
     assert device_type == ParameterType.PARAMETER_STRING and device.startswith("http://")
+    assert _param(probe, "camera_node", "source")[1] == "test_pattern", "this test must not open the camera"
 
     events = probe.node.create_publisher(String, EVENT_TOPIC, event_qos())
     events.publish(String(data="start bc 0 1"))

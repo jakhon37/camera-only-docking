@@ -177,8 +177,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     os.environ["ROS_DOMAIN_ID"] = str(opts.domain_id)
     env = dict(os.environ)
     params = ["--params-file", opts.params_file]
-    camera_args = params + (["-p", "source:=test_pattern"] if opts.test_pattern else [])
-    runner_args = params + ["-p", "backend:=constant", "-p", "enabled_on_start:=true"]
+    # With the node's name: a plain -p loses to that node's own section in the params file.
+    camera_args = params + (["-p", "camera_node:source:=test_pattern"] if opts.test_pattern else [])
+    runner_args = params + ["-p", "policy_runner:backend:=constant", "-p", "policy_runner:enabled_on_start:=true"]
     nodes = [_start_node("camera_node", camera_args, env), _start_node("policy_runner", runner_args, env, quiet=True)]
     rclpy.init(args=argv)
     probe = _Probe()

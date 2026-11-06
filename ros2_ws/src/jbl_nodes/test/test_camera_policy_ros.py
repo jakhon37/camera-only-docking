@@ -321,18 +321,27 @@ def _camera_check(*args):
     return subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
 
 
-def test_camera_check_passes_a_steady_camera():
-    proc = _camera_check("--seconds", "4", "--test-pattern")
+def _params_for_camera_at(tmp_path, url):
+    params = tmp_path / "camera.yaml"
+    params.write_text("camera_node:\n  ros__parameters:\n    source: camera\n    device: \"%s\"\n" % url)
+    return str(params)
+
+
+def test_camera_check_passes_a_steady_camera_and_its_test_pattern_leaves_the_camera_alone(tmp_path):
+    fake = FakeEsp32Cam()
+    try:
+        proc = _camera_check("--seconds", "4", "--test-pattern", "--params-file", _params_for_camera_at(tmp_path, fake.url()))
+    finally:
+        fake.close()
     assert proc.returncode == 0, proc.stdout.decode()
     assert b"PASS" in proc.stdout
+    assert fake.requests == [], "--test-pattern must not open the configured camera"
 
 
 def test_camera_check_fails_a_slow_camera(tmp_path):
     fake = FakeEsp32Cam(fps=3.0)
-    params = tmp_path / "slow.yaml"
-    params.write_text("camera_node:\n  ros__parameters:\n    device: \"%s\"\n" % fake.url())
     try:
-        proc = _camera_check("--seconds", "4", "--params-file", str(params))
+        proc = _camera_check("--seconds", "4", "--params-file", _params_for_camera_at(tmp_path, fake.url()))
     finally:
         fake.close()
     assert proc.returncode == 1, proc.stdout.decode()
