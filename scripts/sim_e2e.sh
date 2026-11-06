@@ -28,7 +28,7 @@
 #   --domain-id N     ROS_DOMAIN_ID inside the container (default 23)
 #   --hfov RAD        camera HFOV of the recorded stages (servo, demos, bc), given to fake_robot
 #                     (camera_hfov_rad) and to dock_judge and servo_baseline (hfov_rad); default
-#                     1.396, the simulator's 80 deg lens; 1.0856 is the robot's Pi Camera v2
+#                     1.396, the simulator's 80 deg lens; 1.0856 is the 62.2 deg evaluation lens
 # Environment: HTTPS_PROXY and CA_BUNDLE as in scripts/docker_test.sh; SIM_CPUSET (e.g. 0-2)
 # pins the simulation container to those cores (docker run --cpuset-cpus; empty = not pinned).
 # Each stage's $WORK/logs/<distro>/<stage>.provenance records the commit, the paths that differ
@@ -44,7 +44,7 @@ REPO_ID=local/jbl_sim
 TEST_POSES="0 1 2 3 4 5 6 7 8 9"
 DEMO_SPOTS=$(seq -s ' ' 10 29)
 EPISODE_TIMEOUT_S=45  # dock_judge ends every episode by 30 s; the margin covers start-up
-SIM_HFOV=1.396  # fake_robot's lens (config/sim.yaml); the robot's Pi Camera v2 is 1.0856
+SIM_HFOV=1.396  # fake_robot's lens (config/sim.yaml); 1.0856 is the 62.2 deg evaluation lens
 
 log() { printf '\n[sim_e2e %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { printf '[sim_e2e] error: %s\n' "$*" >&2; exit 1; }

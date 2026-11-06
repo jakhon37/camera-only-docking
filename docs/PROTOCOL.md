@@ -2,13 +2,27 @@
 
 The runbook for the camera-only docking task on autoJetsonBot. Names, topics, thresholds and
 the success rule come from [INTERFACES.md](INTERFACES.md); if the two disagree, INTERFACES.md
-wins. Every command runs inside the robot's Foxy container (`./robot.sh shell` in
-autoJetsonBot, recreated once with the camera flags of section 4) with this workspace sourced,
-unless it says "Jetson host" or "host" (the training machine: the Python 3.12 venv with
-`requirements-tools.txt`).
+wins. Every command runs inside the robot's Humble container (`./robot.sh shell` in
+autoJetsonBot) with this workspace sourced, unless it says "Jetson host" or "host" (the training
+machine: the Python 3.12 venv with `requirements-tools.txt`).
 
-Order of work: build the scene (1–3), calibrate (4–5), record demos (6), train off-robot, freeze
-everything (7), run the scheduled trials (8–10), analyse and report (11–12).
+Order of work: clear the blockers below, build the scene (1–3), calibrate (4–5), record demos
+(6), train off-robot, freeze everything (7), run the scheduled trials (8–10), analyse and report
+(11–12).
+
+## Before anything drives
+
+Checked on 2026-11-07 without driving anything. No motor has been driven under Humble yet.
+
+| Part | State | Why it blocks |
+|---|---|---|
+| Camera link | 9.8 fps at 320×240 on 2026-11-06, but 2–4 fps with gaps of seconds on 2026-11-07. Cause unknown | Must pass `camera_check` (section 4) in the place it will be used |
+| Camera mount | Not on the robot yet; lens unmeasured | Bearing, marker range and every recorded image depend on it (section 5) |
+| Motor power | `MOTOR-ESP32S3`'s `main.cpp` gives every wheel request from 0.01 to 0.25 m/s the same power, 500/1023. Whether the board runs this rule is unconfirmed; `0.02` and `0.2` m/s giving the same encoder rate with the wheels off the ground would confirm it | If it does, the servo cannot steer below about 14–17° off centre, then pivots at that power; once stopped it will probably overshoot its ±4° deadband; teleop arcs drive straight; the gate's slow zone does nothing until about 0.19 m |
+| Encoders | 344–387 counts per turn by hand against 3,436 configured, and apparently one direction only (whether the second five turns were backward is unconfirmed); left jumps unexplained | `/odom` reads about 1/10 of the real speed, so the judge's 0.02 m/s "stopped" limit passes at about 0.2 m/s. `observation.state` is wrong too (ACT uses it, BC does not) |
+| Lidar | 6.5–6.9 Hz, front direction unchecked, 40% valid returns, most within 0.30 m | Calibrate `forward_angle` (section 4) and check for parts of the chassis in the scan plane |
+
+The first drive needs someone present with the wheels off the ground.
 
 ## 1. Marker
 
@@ -72,9 +86,9 @@ ros2_ws/src/jbl_nodes/config/start_poses.yaml`; regenerate if the YAML changes):
 | 8 | 1.10 | +0.10 | -40 | 0.87 | -0.09 |
 | 9 | 1.40 | -0.45 | -35 | 1.15 | -0.62 |
 
-With the stock 62.2° Pi Camera v2 lens (±31°), poses 5, 6, 7, 8 and 9 start with the marker
-out of view (the YAML comments give the bearings), so the robot has to search. The simulator's
-80° camera sees pose 8 at the image edge.
+With a 62.2° lens (±31°; the ESP32-CAM's is unmeasured, section 5), poses 5, 6, 7, 8 and 9
+start with the marker out of view (the YAML comments give the bearings), so the robot has to
+search. The simulator's 80° camera sees pose 8 at the image edge.
 
 Placing the robot: wheel-axle midpoint over A, robot centreline through B. Two small tape marks
 on the chassis top (above the axle centre and at the front centre) make it a sighting job.
@@ -82,36 +96,50 @@ Target accuracy ±1 cm, ±2°.
 
 ## 4. Bring-up and the lidar `forward_angle`
 
-**Container (once).** autoJetsonBot's stock container cannot reach the CSI camera: the Pi
-Camera v2 is read through Argus (`nvarguscamerasrc`, see `config/robot.yaml`), which needs
-NVIDIA's container runtime and the host's Argus socket (V4L2's `/dev/video0` is raw RG10 Bayer,
-which OpenCV cannot use). On the Jetson host, in the autoJetsonBot checkout, recreate it with
-`robot.sh`'s `docker run` line plus those flags (and `--ipc host`, as in its
-`docker-compose.yaml`, for the TensorRT container of section 8):
+**Camera.** An AI-Thinker ESP32-CAM (OV2640) on Wi-Fi, running
+[myESP32CAM-BLACKBOX](https://github.com/jakhon37/myESP32CAM-BLACKBOX). `camera_node` reads its
+MJPEG stream (`device` in `config/robot.yaml`); the container needs nothing special for it.
+
+- Mount it level and facing straight ahead, powered without a USB data connection: its CH340
+  appears as `/dev/ttyUSB*`, where the robot's launch can take it for the lidar, and opening
+  that port resets the camera.
+- It serves one client at a time, so a browser open on its stream blocks `camera_node`.
+- It forgets its frame size and rate when it reboots. `camera_node` sends `stream_setup` before
+  every connection, and reconnects by itself when the stream drops or goes silent for
+  `stream_timeout_s`.
+- Its address comes from the router. If `camera_node` logs `cannot open`, check the address.
+
+Before every session, while no other `camera_node` is running:
 
 ```bash
-docker rm -f auto_ros_foxy
-docker run -d --name auto_ros_foxy --network host --ipc host --privileged \
-  --runtime nvidia -v /tmp/argus_socket:/tmp/argus_socket \
-  -v "$(pwd)":/autonomous_ROS auto_ros:foxy bash -c "while true; do sleep 3600; done"
+ros2 run jbl_nodes camera_check     # 3 minutes; --seconds changes that
 ```
 
-Then, inside it, these must pass before anything else:
+It must print `PASS`: at least 9 fps, no gap over 0.5 s, under 5% of policy ticks falling back to
+zero because the newest frame is older than 0.2 s (the judge counts those zeros as "still", so they
+can fake a stop), and a view that is not nearly black. It runs on a private ROS domain, so it cannot
+move the robot. Run it with the camera on the robot, facing the real scene, in the room and at the
+charge the session will use, because a pass elsewhere does not carry over:
 
-```bash
-gst-inspect-1.0 nvarguscamerasrc | head -n 3      # the L4T GStreamer plugin is there
-python3 -c "
-import cv2, yaml, subprocess
-share = subprocess.check_output(['ros2', 'pkg', 'prefix', 'jbl_nodes']).decode().strip()
-dev = yaml.safe_load(open(share + '/share/jbl_nodes/config/robot.yaml'))['camera_node']['ros__parameters']['device']
-cap = cv2.VideoCapture(dev, cv2.CAP_GSTREAMER); ok, frame = cap.read(); print('frame', frame.shape if ok else None)"
-```
+| When (not yet mounted) | View | Frames | Rate | Longest gap | Fallback zeros |
+|---|---|---:|---:|---:|---:|
+| 2026-11-06, 13:25 | room | 8 KB | 9.8 fps | under 0.5 s | not measured |
+| 2026-11-07, 00:30 | room | 10 KB | 2.2 fps | 5.5 s | 71% |
+| 2026-11-07, 02:50 | nearly black | 3 KB | 9.6 fps | 0.46 s | 2.1% |
 
-If the plugin is missing (an image without NVIDIA's L4T GStreamer plugins) or no frame comes,
-bridge the camera on the Jetson host instead: `nvarguscamerasrc` (1640×1232) → `nvvidconv` →
-`v4l2sink` on a `v4l2loopback` device in YUY2, pass that device into the container with
-`--device`, and set `camera_node` `device: "/dev/videoN"` in `config/robot.yaml`.
-`scripts/record_robot.sh` opens the camera the same way before every recording.
+The cause of the slow periods is unknown. It is not the reader: at 02:50 the new reader, OpenCV
+and a plain socket reader all ran at about 10 fps, and at 00:30 the plain reader was as slow as
+`camera_node`. Most of the 00:30 pauses fell inside a frame. It is not frame size alone either:
+at 02:57 from a wired PC, 8 KB frames held 10 fps and 12 KB frames held 9–9.5 fps, with one 2 s gap.
+If the check cannot pass, use a USB webcam on the Jetson (`device: "0"`, no `stream_setup`) and
+redo section 5.
+
+**Frame size.** 320×240 is the dataset's own size. In the slow period above, 640×480 fell to 0.9 fps.
+On synthetic frames (best case: plain background), a marker turned 30° was found out to 1.5 m at
+320×240 with a 62.2° lens, but only to 1.0 m with an 80° lens; the farthest start poses need about
+1.45 m (section 5, step 7, checks this on the real lens). Turning at 0.6 rad/s, blur cut that to
+0.7–1.1 m at either size (assuming a 40 ms exposure), so searching from far poses needs slow turns
+or pauses.
 
 **Data.** Everything recorded goes under this checkout, which is on the `/autonomous_ROS` bind
 mount; `/root` inside the container is neither persistent nor visible on the Jetson host. In
@@ -141,7 +169,7 @@ starts `camera_node`, `safety_gate`, `dock_judge` and `trial_logger`:
 
 ```bash
 export FWD=0.0       # replace with the calibrated value below
-export HFOV=1.0856   # stock Pi Camera v2 lens; replace with the calibrated value of section 5
+export HFOV=1.0856   # a placeholder; replace with the calibrated value of section 5
 ros2 launch jbl_nodes robot_record.launch.py forward_angle:=$FWD hfov_rad:=$HFOV \
   trials_csv:=$D/trials/calibration.csv
 ```
@@ -169,8 +197,9 @@ ros2 run jbl_nodes dock_judge --ros-args -p forward_angle:=${FWD:?set FWD} -p hf
 **Motor timeout (once, wheels off the ground).** `diffdrive_node` has no command watchdog. The
 gate publishes a zero twist when it is stopped with SIGINT, SIGTERM, SIGHUP or SIGQUIT, but if
 it is killed (SIGKILL) or crashes the motors keep the last `/cmd_vel`. The launch respawns the
-gate, yet on Foxy `diffdrive_node` hears the new one only after DDS rediscovery, measured at
-2.5–3.6 s after the kill. Only a motor-side timeout bounds this (the ESP32 firmware's 500 ms
+gate, yet on Foxy in simulation `diffdrive_node` heard the new one only after DDS rediscovery,
+2.5–3.6 s after the kill (not measured on Humble). Only a motor-side timeout bounds this (the
+ESP32 firmware's 500 ms
 `m` command timeout), so check it: robot on a stand, drive forward through the gate (teleop on
 `/cmd_vel_in`), then in another terminal
 
@@ -225,7 +254,7 @@ The wheels must stop within about 0.5 s. If they keep turning, run no demos or t
    chassis figures), within ±0.02 m. Write the measured distance down: it converts every lidar
    range below into a bumper distance. Check
    `ros2 topic echo --full-length /safety_gate/status`: `front_min_m` about the same. (The status
-   topics are JSON strings; without `--full-length` Foxy cuts them at 128 characters.)
+   topics are JSON strings; without `--full-length`, `ros2 topic echo` cuts them at 128 characters.)
 6. Slide the box 0.4 m to the robot's left: `front_range_m` must jump to the far background or
    `null`. Put it back.
 7. Stop test: from 0.40 m, drive slowly straight at the box with teleop (section 6) and keep
@@ -243,10 +272,9 @@ The wheels must stop within about 0.5 s. If they keep turning, run no demos or t
 ## 5. Camera HFOV and mount check
 
 The bearing the judge and the servo baseline use is `atan((cx - u) / f)` with
-`f = (W / 2) / tan(HFOV / 2)`, positive = marker to the left. INTERFACES.md and
-`config/robot.yaml` assume the stock Raspberry Pi Camera v2 lens, 62.2° (1.0856 rad); another
-lens, or a cropped sensor mode, changes it, so measure it. (The simulator's camera is 80°,
-1.396 rad.)
+`f = (W / 2) / tan(HFOV / 2)`, positive = marker to the left. `config/robot.yaml` holds 62.2°
+(1.0856 rad), a placeholder and not a measurement of the ESP32-CAM's lens, so measure it. (The
+simulator's camera is 80°, 1.396 rad.)
 
 1. Robot on the centre line, squarely facing the box, camera lens Z = 0.60 m from the face.
 2. Read the bearing a few times:
@@ -265,7 +293,7 @@ lens, or a cropped sensor mode, changes it, so measure it. (The simulator's came
    print(2*math.atan(math.tan(h0/2)*(X/Z)/math.tan(math.radians(abs(b)))))"
    ```
 
-   With the stock lens and the 1.0856 rad default the reading is about −18.4° and this prints
+   With a true 62.2° lens and the 1.0856 rad default the reading is about −18.4° and this prints
    ≈ 1.086. A reading of −13.5° would mean an 80° lens (1.394 rad). With h0 = 1.396 a 62.2°
    lens reads −24.9° and the formula gives 1.085 rad (checked against the judge's own detector
    on rendered frames).
@@ -274,10 +302,16 @@ lens, or a cropped sensor mode, changes it, so measure it. (The simulator's came
    readings within ±1° of ±18.4°.
 6. Docked check: put the robot squarely at lidar range 0.25 m on the centre line. The status
    must show `marker_visible: true`, `marker_id: 7`, `in_band`, `aligned` and, once still,
-   `stopped` and `success: true` after 1 s. If the marker is not visible here, first check that
-   `camera_node` uses the 1640×1232 pipeline of `config/robot.yaml`: a cropped Argus sensor mode
-   (1280×720, 1920×1080) narrows both HFOV and VFOV and cuts the marker off when docked. Then
-   fix the marker height (section 2) before recording anything.
+   `stopped` and `success: true` after 1 s. If the marker is not visible here, fix the camera's
+   tilt or the marker height (section 2) before recording anything.
+7. Far check: put the robot on pose 6's and pose 7's A marks, turned to face the marker and
+   still. `marker_visible: true` must hold on nearly every status message. If it does not,
+   320×240 is too coarse for this lens: try 640×480 if the link allows it (`width`, `height` and
+   `stream_setup` in `config/robot.yaml`) before recording anything. Moving a test pose closer
+   changes the protocol, so say so in the report.
+8. Measure how far the lens is ahead of the lidar's centre and set `camera_ahead_of_lidar_m`
+   under `servo_baseline` in `config/robot.yaml`. The default, 0.033 m, is the simulator's. The
+   servo uses it to estimate range from the marker when the lidar has none.
 
 ## 6. Teleop demonstrations
 
@@ -317,12 +351,12 @@ gate zeroes its output 0.3 s after the last command.
   publishes at its Publish Rate (10 Hz) while a direction key or button is held and a zero
   twist on release. Set Max Linear Velocity to 0.15 and Max Angular Velocity to 0.6 (speed
   sliders at 1).
-- **Joystick** (`apt install ros-foxy-joy ros-foxy-teleop-twist-joy`):
+- **Joystick** (`apt install ros-humble-joy ros-humble-teleop-twist-joy`):
   `ros2 run joy joy_node --ros-args -p autorepeat_rate:=20.0` and
   `ros2 run teleop_twist_joy teleop_node --ros-args -r cmd_vel:=/cmd_vel_in` (with its
   enable-button and scale parameters set for your pad); `autorepeat_rate` keeps it publishing
   while the stick is held.
-- **Keyboard** (`apt install ros-foxy-teleop-twist-keyboard` if it is missing; it needs a real
+- **Keyboard** (`apt install ros-humble-teleop-twist-keyboard` if it is missing; it needs a real
   terminal, so use `docker exec -it`):
 
   ```bash
@@ -353,7 +387,8 @@ Per episode:
    `train_bc.py --methods teleop --outcomes success --split-by pose_id`).
 
 Leave the bag running for the whole session; `bag_to_lerobot.py` splits it on `/episode/event`.
-Disk use is ≈ 2 GB per hour, mostly the 15 Hz JPEG stream.
+Disk use is ≈ 0.5 GB per hour, mostly the JPEG stream (about 13 KB per frame in the lit room, at
+10 fps).
 
 ## 7. Freeze before the trials
 
@@ -377,7 +412,7 @@ change until the last trial:
   back, the method order rotates through a Latin square across blocks and rounds (each method
   goes first and second equally often), and the pose order is reshuffled per round with a
   fixed seed. That keeps the two halves of every McNemar pair minutes apart, so battery and
-  lighting drift cannot favour one method. Use `--order blocked` only if the Nano cannot run all
+  lighting drift cannot favour one method. Use `--order blocked` only if the Jetson cannot run all
   policies at once, and say so in the report. Print `schedule.md` as the run sheet.
 
 If something must change mid-evaluation (a bug), stop, fix, and start again from round 1 with a
@@ -394,13 +429,12 @@ ros2 launch jbl_nodes robot_record.launch.py with_servo:=true forward_angle:=$FW
   trials_csv:=$D/trials/2026-11-02/trials.csv bag:=$D/bags/trials_$(date +%Y%m%d_%H%M)
 ```
 
-The BC policy with TensorRT runs in the L4T TensorRT container of the README ("Deployment",
-on-board), not in `./robot.sh shell`: the Foxy container's Python 3.8 cannot import JetPack
-4.6's TensorRT bindings. There, with this workspace built:
+On-board inference is not set up yet: the Humble container has neither TensorRT nor ONNX Runtime
+(README, "Deployment"). Once a backend is installed where this workspace is built:
 
 ```bash
 ros2 run jbl_nodes policy_runner --ros-args -r __node:=policy_bc \
-  -p method_filter:=bc -p backend:=tensorrt -p model_path:=<bc engine>
+  -p method_filter:=bc -p backend:=<backend> -p model_path:=<bc model>
 ```
 
 (An `act` runner joins here only once ACT can be exported; section 7.) Each method drives only
@@ -409,10 +443,11 @@ teleop terminal during trials. For off-board inference (policy_runner on a lapto
 the laptop clock must be synchronised with the robot (chrony offset < 5 ms), otherwise frames
 look stale and the runner publishes zeros; label those results "off-board".
 
-Checklist before round 1 and after every break: `ros2 node list` shows all nodes;
-`ros2 topic hz /camera/image_raw/compressed` ≈ 15, `/scan` 5–10, `/odom` steady; docked check of
-section 5 passes; battery ≥ 12.0 V (3S pack); bag and video recording running; the trial logger
-prints the CSV path.
+Checklist: `camera_check` (section 4) prints `PASS` before the launch above. Before round 1 and
+after every break: `ros2 node list` shows all nodes; `ros2 topic hz
+/camera/image_raw/compressed` ≈ 10, `/scan` 5–10, `/odom` steady; docked check of section 5
+passes; battery ≥ 12.0 V (3S pack); bag and video recording running; the trial logger prints the
+CSV path.
 
 ## 9. Success definition (from INTERFACES.md, judged by `dock_judge`)
 
@@ -481,7 +516,7 @@ umask 022, so a normal user can read it):
 ```bash
 rsync -av <jetson>:<autoJetsonBot checkout>/camera-only-docking/data/robot/ data/robot/
 python tools/analyze_trials.py data/robot/trials/2026-11-02/trials.csv \
-  --schedule trials/schedule.csv --setting "real robot, on-board TensorRT" \
+  --schedule trials/schedule.csv --setting "real robot, on-board <backend>" \
   --latency jetson=data/robot/bags/trials_20261102_1405 --gate data/robot/bags/trials_20261102_1405 \
   --out-dir reports/2026-11-02
 ```
@@ -502,7 +537,7 @@ finished trial can never change it; a success with an intervention counts as a f
 
 Every number, chart and video carries its labels:
 
-- **Setting**: real robot or simulation (`fake_robot`); on-board (Jetson Nano, backend and
+- **Setting**: real robot or simulation (`fake_robot`); on-board (Jetson Xavier NX, backend and
   precision) or off-board (which machine, over Wi-Fi); autonomous or teleoperated.
 - **Scale**: one robot, one room, one box and marker, 10 fixed start poses × 3 rounds = 30
   trials per method; demos: how many, by how many operators, whether the test poses were held
