@@ -421,6 +421,7 @@ def test_randomized_exposure_and_noise():
 
 
 def test_render_time_budget():
+    # Half a frame at the 15 fps of config/sim.yaml. The Jetson takes about 20 ms, and so can a busy PC.
     for sim in (SimWorld(), SimWorld(randomize=True)):
         sim.reset(facing_box(0.314))  # docked: the sheet fills a third of the frame
         sim.render()
@@ -429,4 +430,4 @@ def test_render_time_budget():
             t0 = time.perf_counter()
             sim.render()
             times.append(time.perf_counter() - t0)
-        assert float(np.median(times)) < 0.015, "median %.1f ms" % (1e3 * float(np.median(times)))
+        assert float(np.median(times)) < 0.033, "median %.1f ms" % (1e3 * float(np.median(times)))

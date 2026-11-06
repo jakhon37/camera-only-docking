@@ -240,10 +240,14 @@ def test_camera_reopens_a_source_after_read_failures(graph, tmp_path):
 
     raw = graph.record(Image, "/camera/image_raw")
     camera(graph, source="camera", device=path, width=160, height=120)
-    # The clip ends after 5 frames; every later read fails until the node reopens the file.
-    assert graph.spin_until(lambda: len(raw) >= 2, timeout=5.0), len(raw)
+    # The clip ends after 5 frames; every later read fails until the node reopens the file. How
+    # many of the 5 pass the rate limit depends on how fast the CPU decodes them.
+    def reopened():
+        stamps = [stamp_s(msg) for msg, _ in raw]
+        return any(b - a > 0.3 for a, b in zip(stamps, stamps[1:]))
+
+    assert graph.spin_until(reopened, timeout=5.0), [stamp_s(msg) for msg, _ in raw]
     assert (raw[0][0].width, raw[0][0].height) == (160, 120)  # resized to the requested size
-    assert stamp_s(raw[1][0]) - stamp_s(raw[0][0]) > 0.3
 
 
 # ---------------------------------------------------------------- policy_runner

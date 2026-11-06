@@ -129,7 +129,9 @@ class Graph(object):
                 return True
             if every is not None and time.monotonic() >= next_call:
                 every()
-                next_call += period
+                # From now, not on a fixed schedule: on a slow CPU (the Jetson) catching up would
+                # leave spin_once no time, and the callbacks would fall further and further behind.
+                next_call = time.monotonic() + period
             self.executor.spin_once(timeout_sec=0.005)
         return predicate()
 
