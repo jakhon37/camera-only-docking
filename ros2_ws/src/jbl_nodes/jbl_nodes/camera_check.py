@@ -39,7 +39,7 @@ from std_msgs.msg import String
 MIN_FPS = 9.0
 MAX_GAP_S = 0.5
 MAX_FALLBACK_PCT = 5.0
-MIN_BRIGHTNESS = 25.0  # mean grey level, 0-255; a covered lens or a dark room measured about 9
+MIN_BRIGHTNESS = 25.0  # mean grey level, 0-255; the nearly black view of 2026-11-07 measured 9
 BRIGHTNESS_EVERY = 10  # frames
 DEFAULT_SECONDS = 180.0
 DEFAULT_DOMAIN_ID = 88

@@ -528,6 +528,7 @@ What it does not show (details in the write-up):
 ```bash
 bash scripts/docker_test.sh foxy humble jazzy        # colcon build + test of both packages per distro
 HF_HUB_OFFLINE=1 python -m pytest tests ros2_ws/src/jbl_nodes/test -q   # host tools + pure-Python node logic
+IMAGE=auto_ros:humble bash scripts/docker_test.sh humble   # on the Jetson host: the robot's own image
 ```
 
 The ROS tests include gtest for the gate logic, launch tests for the gate, nodes on a live graph
@@ -576,8 +577,9 @@ Last run (October 2026):
 - **ACT is not deployable yet** (action chunks + odometry input vs the image-only, single-action
   ONNX contract); `train_act.sh` trains it, nothing exports or runs it on the robot.
 - **Nothing has driven on the real robot, and on-board inference is not set up.** The real
-  camera connects but was not steady when last measured, and the motor firmware and the encoders
-  have known problems (PROTOCOL, "Before anything drives"). The lidar's 0° may point backwards on
+  camera connects, but its rate has swung between 2 and 10 fps for reasons not yet known, and the
+  motor firmware and the encoders have known problems (PROTOCOL, "Before anything drives"). The
+  lidar's 0° may point backwards on
   this robot (`forward_angle` may be π): calibrate it (PROTOCOL §4) before anything drives.
 - **The simulator's chassis is not the URDF's.** `fake_robot` puts the bumper 0.033 m ahead of
   the lidar (the 0.25 m docking range is then ≈ 0.22 m bumper to box); the URDF puts it 0.094 m
