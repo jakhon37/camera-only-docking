@@ -1,0 +1,14 @@
+stage: servo (2026-11-07T13:33:44Z)
+commit: 58fe682fb820b6e3fbf570a595b22b6b65cfd3e8
+dirty: 0 paths outside results/, 0 tracked under results/
+camera hfov_rad: 1.396 (fake_robot camera_hfov_rad, dock_judge and servo_baseline hfov_rad)
+SIM_CPUSET: (not set: container not pinned)
+loadavg at start: 0.06 0.10 0.09 1/620 124582
+launch servo, as the nodes report it:
+  dock_judge.request_still_v: 0.005
+  dock_judge.hfov_rad: 1.396
+  fake_robot.camera_hfov_rad: 1.396
+  servo_baseline.stop_hysteresis: 0.03
+  servo_baseline.hfov_rad: 1.396
+loadavg after servo: 3.17 2.47 1.30 1/633 130599
+loadavg at end: 3.17 2.47 1.30 1/633 130600 (2026-11-07T13:43:30Z)
