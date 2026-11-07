@@ -12,8 +12,8 @@ fake_robot:
     box_x: 1.5           # front face centre (m) in the 4 x 3 m room
     box_y: 0.0
     box_yaw: 3.14159265  # the face looks along -x
-    camera_hfov_rad: 1.396  # the simulated lens (80 deg); the robot's Pi Camera v2 is 1.0856
-    camera_fps: 15.0     # the rate camera_node records /camera/image_raw/compressed at
+    camera_hfov_rad: 1.396  # the simulated lens (80 deg); 1.0856 is the 62.2 deg evaluation lens
+    camera_fps: 15.0     # camera_node's default cap; the real camera delivers 10 at most
     scan_rate: 10.0      # RPLidar A1
     jpeg_quality: 85
     cmd_timeout: 0.5     # backstop only; the gate already zeroes /cmd_vel after 0.3 s

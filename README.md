@@ -2,7 +2,7 @@
 
 Teleop demonstrations → LeRobot dataset → learned policy → on-robot deployment and paired
 trials, on a real low-cost robot: [autoJetsonBot](https://github.com/jakhon37/autoJetsonBot)
-(Jetson Nano B01, ROS 2 Foxy, RPLidar A1, Pi Camera v2). The task is **camera-only docking**:
+(Jetson Xavier NX, ROS 2 Humble, RPLidar A1, ESP32-CAM on Wi-Fi). The task is **camera-only docking**:
 from one of 10 marked start poses, drive to a box with an ArUco marker on its front face and
 stop facing it at docking range (0.18–0.32 m lidar range, marker within 10° of the image
 centre; the rule does not measure squareness to the face). A classical baseline (ArUco bearing + lidar range servo) and
@@ -13,8 +13,11 @@ Everything except the hardware runs in a kinematic simulator (`fake_robot`), so 
 pipeline is testable on a laptop without a GPU.
 
 > **Status.** All numbers in this README are from **simulation**. The real-robot protocol
-> ([docs/PROTOCOL.md](docs/PROTOCOL.md)) is written and its tools are tested, but no trials
-> have been run on the robot yet, and nothing has run on a Jetson.
+> ([docs/PROTOCOL.md](docs/PROTOCOL.md)) is written and its tools are tested, but nothing has
+> driven on the robot and no trials have been run. On the Jetson so far: the packages build and
+> pass their tests, and `camera_node` reads the camera. The project was first planned for a
+> Jetson Nano, ROS 2 Foxy and a Pi Camera v2. The simulation runs below predate the change: "the
+> robot's distro" there means Foxy and "the robot's lens" means that camera's 62.2° lens.
 
 ## Architecture
 
@@ -25,7 +28,7 @@ all three with the same topics.
 
 ```text
  SENSORS  (robot: camera_node, rplidar, diffdrive_node   |   simulation: fake_robot publishes all three)
-   /camera/image_raw/compressed   JPEG 15 Hz, capture stamp ──▶ servo_baseline, policy_runner, dock_judge
+   /camera/image_raw/compressed   JPEG 10-15 Hz, capture stamp ─▶ servo_baseline, policy_runner, dock_judge
    /scan                          LaserScan ~10 Hz          ──▶ safety_gate, servo_baseline, dock_judge
    /odom                          measured v, w             ──▶ dock_judge
 
@@ -49,14 +52,14 @@ all three with the same topics.
 
  OFFLINE  (host, Python 3.12)
    ros2 bag record ─▶ bag_to_lerobot.py ─▶ LeRobot v3 dataset ─▶ train_bc.py ─▶ export_onnx.py
-       ─▶ policy.onnx + policy_meta.json ─▶ policy_runner (ONNX Runtime off-board, or a TensorRT engine on the Nano)
+       ─▶ policy.onnx + policy_meta.json ─▶ policy_runner (ONNX Runtime off-board; on-board not set up yet)
    trials.csv + bags ─▶ analyze_trials.py ─▶ report.md, success.png
 ```
 
 | Package / dir | What it is |
 |---|---|
 | `ros2_ws/src/jbl_safety` | C++17 safety gate: ROS-free `SafetyGate` logic (gtest) + node; forward sector check with lidar dead-zone handling, command/scan timeouts, clamps, timing stats |
-| `ros2_ws/src/jbl_nodes` | Python (3.8-compatible) nodes: `camera_node`, `dock_judge`, `servo_baseline`, `policy_runner`, `trial_logger`, `fake_robot`, the `episode` CLI, shared preprocessing, launch files and params |
+| `ros2_ws/src/jbl_nodes` | Python (3.8-compatible) nodes: `camera_node`, `dock_judge`, `servo_baseline`, `policy_runner`, `trial_logger`, `fake_robot`, the `episode` and `camera_check` CLIs, shared preprocessing, launch files and params |
 | `tools/` | Host tools (Python 3.12, `requirements-tools.txt`): bag → LeRobot conversion, BC training, ONNX export, ACT training wrapper, TensorRT build script, marker generator, trial schedule, analysis and statistics |
 | `docs/` | `INTERFACES.md` (contract), `PROTOCOL.md` (real-robot runbook) |
 | `scripts/` | `docker_test.sh` (build + test on Foxy/Humble/Jazzy), `sim_e2e.sh` (whole pipeline in simulation), `sim_eval.sh` + `sim_eval_summary.py` (the harder paired evaluation), `stop_labels.py` (stop examples in demos, datasets and models), `record_robot.sh` (demos on the robot) |
@@ -116,15 +119,16 @@ start poses, lidar `forward_angle` and camera HFOV calibration, teleop demonstra
 models before trials, the counterbalanced schedule, interventions and aborts, video rules,
 analysis and honest reporting.
 
-Build inside the robot's Foxy container (autoJetsonBot's `./robot.sh shell`; clone this repo
-into the autoJetsonBot checkout so the container sees it under `/autonomous_ROS/`). The stock
-container cannot open the CSI camera: recreate it once with `--runtime nvidia -v
-/tmp/argus_socket:/tmp/argus_socket` and check it (PROTOCOL section 4). Then:
+Build inside the robot's Humble container (autoJetsonBot's `./robot.sh shell`; clone this repo
+into the autoJetsonBot checkout so the container sees it under `/autonomous_ROS/`. This repo's
+`COLCON_IGNORE` keeps `./robot.sh build` out of it). Clear the blockers first (PROTOCOL, "Before
+anything drives"). Then:
 
 ```bash
 cd /autonomous_ROS/camera-only-docking/ros2_ws && colcon build --symlink-install
 source install/setup.bash
-bash ../scripts/record_robot.sh    # camera check, then camera, gate, judge, logger + bag in data/robot/
+ros2 run jbl_nodes camera_check    # must print PASS before any session (PROTOCOL section 4)
+bash ../scripts/record_robot.sh    # reads one frame, then camera, gate, judge, logger + bag in data/robot/
 ```
 
 Recordings go to `data/robot/` in this checkout, which is on the `/autonomous_ROS` bind mount
@@ -197,32 +201,15 @@ next to the distro's own numpy, which python3-opencv is built against (`inner_on
   numpy ≥ 1.16.6.
 - **Jazzy:** ONNX Runtime 1.31.1.
 
-**On-board (Jetson Nano, TensorRT).** Build the engine on the Nano itself with
-`bash tools/build_trt_nano.sh policy.onnx` (TensorRT 8.0/8.2 from JetPack 4.6; the export is
-opset 13 for that reason) and run `robot_policy.launch.py model_path:=policy_fp16.engine
-backend:=tensorrt`. The TensorRT Python bindings of JetPack 4.6 are built for Python 3.6, but
-autoJetsonBot's Foxy container is Ubuntu 20.04 / Python 3.8, so the practical route is a
-[jetson-containers](https://github.com/dusty-nv/jetson-containers) L4T image that has ROS 2
-Foxy built against JetPack's Python (`dustynv/ros:foxy-ros-base-l4t-r32.<x>`), with this
-workspace built inside it. Pick the image tag that matches the first line of
-`/etc/nv_tegra_release`: r32.6.1 for JetPack 4.6, r32.7.1 for 4.6.1 (if that tag is not
-published, build the image with jetson-containers for your L4T). Start it with
-`--runtime nvidia --network host --ipc host`: the nodes in autoJetsonBot's `auto_ros_foxy`
-container talk to it over Fast DDS shared memory (its `docker-compose.yaml` already gives that
-container `ipc: host`; `robot.sh`'s fallback `docker run` does not, so use the one in
-PROTOCOL section 4). The tensorrt backend also needs pycuda, which JetPack does not install
-(cuda-python needs CUDA 11 and Python ≥ 3.7, so it cannot replace it on JetPack 4.6's CUDA
-10.2). Install and check it inside the container:
-
-```bash
-export PATH=/usr/local/cuda/bin:$PATH
-pip3 install 'pycuda==2022.1'   # the last release for Python 3.6
-python3 -c 'import tensorrt, pycuda.driver'
-```
-
-The ROS nodes avoid post-3.6 syntax and standard-library calls (checked with `vermin`, not run
-on 3.6). **Untested**: no Jetson was available, so the TensorRT backend and the engine script
-have only run against stand-ins.
+**On-board (Jetson Xavier NX).** Not set up yet: no policy has run on the robot. JetPack 5.1.6
+has TensorRT 8.5.2 and CUDA 11.4, but its Python bindings are for the host's Python 3.8, which
+has no ROS, and the Humble container (Python 3.10) has neither TensorRT nor ONNX Runtime. The
+choice is still open; ONNX Runtime inside the container is the first thing to try. A second
+container for TensorRT needs `--ipc host` on both containers, because the running
+`auto_ros_humble` has its own IPC namespace and Fast DDS uses shared memory on one host.
+`tools/build_trt_nano.sh` was written for the Nano's TensorRT 8.0/8.2: on 8.5 it needs
+`--memPoolSize` for `--workspace`. The TensorRT backend and that script have only run against
+stand-ins.
 
 ## Results (SIMULATION)
 
@@ -289,7 +276,7 @@ Training and runtime on the same CPU (4 cores):
 
 What this does and does not show:
 
-- **The parts work together.** On Foxy, the robot's distro, and on Jazzy, recording,
+- **The parts work together.** On Foxy, then the robot's distro, and on Jazzy, recording,
   conversion, training, export, ONNX Runtime inference in a ROS node, the judge, the logger and
   the statistics all ran.
 - **The servo docks and stops by itself** from all 10 poses on both distros: it commands zero
@@ -541,6 +528,7 @@ What it does not show (details in the write-up):
 ```bash
 bash scripts/docker_test.sh foxy humble jazzy        # colcon build + test of both packages per distro
 HF_HUB_OFFLINE=1 python -m pytest tests ros2_ws/src/jbl_nodes/test -q   # host tools + pure-Python node logic
+IMAGE=auto_ros:humble bash scripts/docker_test.sh humble   # on the Jetson host: the robot's own image
 ```
 
 The ROS tests include gtest for the gate logic, launch tests for the gate, nodes on a live graph
@@ -556,6 +544,18 @@ Last run (October 2026):
   failures and 8 skips. The skipped tests are the ONNX Runtime and TorchScript backend checks;
   the base images have neither package.
 - **Host.** 385 passed and 5 skipped. The skipped tests need rclpy or `sensor_msgs`.
+
+On the robot's Jetson Xavier NX (November 2026, arm64):
+
+- **The robot's own image** (`auto_ros:humble`). 303 tests, 0 failures and the same 8 skips.
+- **The official Jazzy and Foxy images.** The same. Foxy's first full run had 1 failure, when its
+  `ros2 launch` took the SIGINT in the middle of a log flush. That test then passed 10 of 10, 5 on
+  the code before these changes and 5 after, and a second full run passed.
+- **On a PC, without ROS.** The node tests in `ros2_ws/src/jbl_nodes/test`: 202 passed and 13
+  skipped. The rest of the host suite was not rerun; in `tools/`, only a comment changed.
+- **With the real camera, by hand.** `camera_check`, and `record_robot.sh` through to a closed bag.
+  A simulator bag from that image was read with `bag_to_lerobot.py`'s reader, but not converted
+  to a dataset.
 
 ## Limitations
 
@@ -588,9 +588,11 @@ Last run (October 2026):
   dataset does not use them yet.
 - **ACT is not deployable yet** (action chunks + odometry input vs the image-only, single-action
   ONNX contract); `train_act.sh` trains it, nothing exports or runs it on the robot.
-- **TensorRT on the Nano, the real camera, the real lidar and the motor bridge are untested.**
-  The lidar's 0° may point backwards on this robot (`forward_angle` may be π): calibrate it
-  (PROTOCOL §4) before anything drives.
+- **Nothing has driven on the real robot, and on-board inference is not set up.** The real
+  camera connects, but its rate has swung between 2 and 10 fps for reasons not yet known, and the
+  motor firmware and the encoders have known problems (PROTOCOL, "Before anything drives"). The
+  lidar's 0° may point backwards on
+  this robot (`forward_angle` may be π): calibrate it (PROTOCOL §4) before anything drives.
 - **The simulator's chassis is not the URDF's.** `fake_robot` puts the bumper 0.033 m ahead of
   the lidar (the 0.25 m docking range is then ≈ 0.22 m bumper to box); the URDF puts it 0.094 m
   ahead (≈ 0.16 m) and the camera at x = 0.15 m. The success band and the gate thresholds are

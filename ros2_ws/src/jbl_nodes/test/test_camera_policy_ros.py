@@ -16,6 +16,7 @@ import pytest
 rclpy = pytest.importorskip("rclpy")
 
 import cv2  # noqa: E402
+from fake_esp32cam import FakeEsp32Cam  # noqa: E402
 from geometry_msgs.msg import Twist  # noqa: E402
 from rclpy.context import Context  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
@@ -25,7 +26,15 @@ from sensor_msgs.msg import CompressedImage, Image  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 
 from jbl_nodes import imgconv  # noqa: E402
-from jbl_nodes.camera_node import CameraNode, RateLimiter, parse_device, render_test_pattern  # noqa: E402
+from jbl_nodes.camera_check import failures as camera_check_failures  # noqa: E402
+from jbl_nodes.camera_node import (  # noqa: E402
+    CameraNode,
+    OpenCvSource,
+    RateLimiter,
+    make_camera_source,
+    parse_device,
+    render_test_pattern,
+)
 from jbl_nodes.episode_cli import (  # noqa: E402
     EVENT_TOPIC,
     EpisodeEvent,
@@ -34,6 +43,7 @@ from jbl_nodes.episode_cli import (  # noqa: E402
     parse_episode_event,
 )
 from jbl_nodes.judge_logic import is_intervention  # noqa: E402
+from jbl_nodes.mjpeg_source import MjpegHttpSource  # noqa: E402
 from jbl_nodes.policy_runner import PolicyRunner  # noqa: E402
 
 CONSTANT = [0.4, -0.2]
@@ -178,8 +188,15 @@ def test_parse_device():
     assert parse_device(0) == 0 and parse_device(" 2 ") == 2
     assert parse_device("/dev/video1") == "/dev/video1"
     assert parse_device("videotestsrc ! appsink") == "videotestsrc ! appsink"
+    assert parse_device("http://192.168.0.2/stream") == "http://192.168.0.2/stream"
     with pytest.raises(ValueError):
         parse_device("")
+
+
+def test_only_an_http_device_gets_the_stream_reader():
+    assert isinstance(make_camera_source("http://192.168.0.2/stream", 320, 240, 15.0), MjpegHttpSource)
+    for device in (0, "/dev/video1", "rtsp://192.168.0.2/stream", "videotestsrc ! appsink"):
+        assert isinstance(make_camera_source(device, 320, 240, 15.0), OpenCvSource)
 
 
 def test_test_pattern_moves():
@@ -218,9 +235,10 @@ def test_camera_publishes_stamped_raw_and_compressed(graph):
     assert imgconv.compressed_to_bgr(cmsg).shape == (480, 640, 3)
 
 
-def test_camera_survives_a_missing_device(graph):
+@pytest.mark.parametrize("device", ["/nonexistent/video0", "http://127.0.0.1:9/stream"], ids=["path", "url"])
+def test_camera_survives_a_missing_device(graph, device):
     raw = graph.record(Image, "/camera/image_raw")
-    node = camera(graph, source="camera", device="/nonexistent/video0")
+    node = camera(graph, source="camera", device=device)
     graph.spin_for(1.0)
     assert raw == [] and node._thread.is_alive()
     t0 = time.monotonic()
@@ -240,10 +258,105 @@ def test_camera_reopens_a_source_after_read_failures(graph, tmp_path):
 
     raw = graph.record(Image, "/camera/image_raw")
     camera(graph, source="camera", device=path, width=160, height=120)
-    # The clip ends after 5 frames; every later read fails until the node reopens the file.
-    assert graph.spin_until(lambda: len(raw) >= 2, timeout=5.0), len(raw)
+    # The clip ends after 5 frames; every later read fails until the node reopens the file. How
+    # many of the 5 pass the rate limit depends on how fast the CPU decodes them.
+    def reopened():
+        stamps = [stamp_s(msg) for msg, _ in raw]
+        return any(b - a > 0.3 for a, b in zip(stamps, stamps[1:]))
+
+    assert graph.spin_until(reopened, timeout=5.0), [stamp_s(msg) for msg, _ in raw]
     assert (raw[0][0].width, raw[0][0].height) == (160, 120)  # resized to the requested size
-    assert stamp_s(raw[1][0]) - stamp_s(raw[0][0]) > 0.3
+
+
+def test_camera_stamps_a_stalled_stream_frame_from_its_boundary_and_outlives_a_reboot(graph):
+    fake = FakeEsp32Cam()
+    fake.stall_inside[3] = 0.6
+    fake.reboot_after = 6
+    raw = graph.record(Image, "/camera/image_raw")
+    try:
+        camera(
+            graph,
+            source="camera",
+            device=fake.url(),
+            stream_setup="/resolution?size=QVGA",
+            stream_timeout_s=1.0,
+            width=320,
+            height=240,
+        )
+        assert graph.spin_until(lambda: len(raw) >= 9, timeout=10.0), len(raw)
+    finally:
+        fake.close()
+
+    assert (raw[0][0].width, raw[0][0].height) == (320, 240)
+    # Frame 3 reached the node 0.6 s late, and its stamp says so: a reader's age check sees the truth.
+    arrival_gap = raw[3][1] - raw[2][1]
+    stamp_gap = stamp_s(raw[3][0]) - stamp_s(raw[2][0])
+    assert arrival_gap >= 0.55 and stamp_gap < 0.25, (arrival_gap, stamp_gap)
+    # The reboot dropped the connection and reset the size; the node reconnected and set it again.
+    assert fake.requests == ["/resolution?size=QVGA", "/stream"] * 2
+    assert fake.size == "QVGA"
+
+
+# ---------------------------------------------------------------- camera_check
+
+
+def test_camera_check_failures_name_what_misses_the_pass_mark():
+    assert camera_check_failures(9.0, 0.5, 4.9, 25.0) == []
+    missed = camera_check_failures(2.18, 5.5, 71.0, 9.4)
+    assert len(missed) == 4 and "2.18 fps" in missed[0] and "5.50 s" in missed[1] and "71.0%" in missed[2]
+    assert "nearly black" in missed[3] and "9 of 255" in missed[3]
+    assert len(camera_check_failures(8.9, 0.1, 0.0, 100.0)) == 1
+    assert len(camera_check_failures(10.0, 0.51, 0.0, 100.0)) == 1
+    assert len(camera_check_failures(10.0, 0.1, 5.0, 100.0)) == 1
+    assert len(camera_check_failures(10.0, 0.1, 0.0, 24.9)) == 1
+
+
+def _camera_check(*args):
+    from ament_index_python.packages import get_package_prefix
+
+    exe = os.path.join(get_package_prefix("jbl_nodes"), "lib", "jbl_nodes", "camera_check")
+    env = {k: v for k, v in os.environ.items() if k != "ROS_DOMAIN_ID"}
+    domain = str(random.SystemRandom().randint(30, 99))
+    command = [exe, "--domain-id", domain] + list(args)
+    return subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+
+
+def _params_for_camera_at(tmp_path, url):
+    params = tmp_path / "camera.yaml"
+    params.write_text("camera_node:\n  ros__parameters:\n    source: camera\n    device: \"%s\"\n" % url)
+    return str(params)
+
+
+def test_camera_check_passes_a_steady_camera_and_its_test_pattern_leaves_the_camera_alone(tmp_path):
+    fake = FakeEsp32Cam()
+    try:
+        proc = _camera_check("--seconds", "4", "--test-pattern", "--params-file", _params_for_camera_at(tmp_path, fake.url()))
+    finally:
+        fake.close()
+    assert proc.returncode == 0, proc.stdout.decode()
+    assert b"PASS" in proc.stdout
+    assert fake.requests == [], "--test-pattern must not open the configured camera"
+
+
+def test_camera_check_fails_a_slow_camera(tmp_path):
+    fake = FakeEsp32Cam(fps=3.0)
+    try:
+        proc = _camera_check("--seconds", "4", "--params-file", _params_for_camera_at(tmp_path, fake.url()))
+    finally:
+        fake.close()
+    assert proc.returncode == 1, proc.stdout.decode()
+    assert b"fps is under" in proc.stdout and b"fallback zeros is not under" in proc.stdout
+
+
+def test_camera_check_refuses_the_robots_own_domain():
+    from ament_index_python.packages import get_package_prefix
+
+    exe = os.path.join(get_package_prefix("jbl_nodes"), "lib", "jbl_nodes", "camera_check")
+    env = {k: v for k, v in os.environ.items() if k != "ROS_DOMAIN_ID"}
+    proc = subprocess.run(
+        [exe, "--domain-id", "0", "--test-pattern"], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20
+    )
+    assert proc.returncode == 2 and b"own ROS domain" in proc.stdout
 
 
 # ---------------------------------------------------------------- policy_runner

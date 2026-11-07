@@ -3,7 +3,8 @@
 # (JetPack 4.6.x: TensorRT 8.0.1 on 4.6, 8.2.1 on 4.6.1+).
 #
 # UNTESTED ON HARDWARE: no Jetson was available when this was written. The trtexec options are
-# those of TensorRT 8.0 / 8.2 (--workspace in MiB; 8.4+ replaced it with --memPoolSize).
+# those of TensorRT 8.0 / 8.2 (--workspace in MiB; 8.4+ replaced it with --memPoolSize), so it
+# needs that change for the robot's Xavier NX (JetPack 5.1.6, TensorRT 8.5.2).
 #
 #   bash tools/build_trt_nano.sh deploy/bc/policy.onnx
 #   # -> deploy/bc/policy_fp16.engine, policy_fp16.timing.txt, policy_fp32.timing.txt, build log

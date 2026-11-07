@@ -3,6 +3,10 @@
 #
 #   bash scripts/docker_test.sh [foxy humble jazzy]     (default: all three)
 #   PKGS="jbl_safety" bash scripts/docker_test.sh foxy   (only these packages)
+#   IMAGE=auto_ros:humble bash scripts/docker_test.sh humble   (another image: on the Jetson, the robot's own)
+#
+# Each run gets its own container with no host network and no devices, so on the robot the tests
+# cannot reach a running motor bridge. Do not run them inside the robot's own container.
 #
 # Uses the official ros:<distro>-ros-base images (pulled from mirror.gcr.io when Docker Hub
 # rate-limits) and installs only Ubuntu packages (python3-opencv, python3-pytest, numpy).
@@ -27,7 +31,8 @@ run_one() {
     proxy_args+=(-v "$CA_BUNDLE:/usr/local/share/ca-certificates/extra-ca.crt:ro")
   fi
   mkdir -p "build_logs"
-  docker run --rm "${proxy_args[@]}" -e "PKGS=$PKGS" -v "$REPO:/repo:ro" "$REGISTRY/ros:$d-ros-base" bash -c '
+  docker run --rm "${proxy_args[@]}" -e "PKGS=$PKGS" -e "ROS_DISTRO=$d" -v "$REPO:/repo:ro" --entrypoint bash \
+    "${IMAGE:-$REGISTRY/ros:$d-ros-base}" -c '
     set -eo pipefail  # else a failing "colcon test | tail" returns the status of tail and passes
     update-ca-certificates >/dev/null 2>&1 || true
     # apt over HTTPS only (plain-HTTP mirrors may be blocked by the proxy); ROS apt repo not needed

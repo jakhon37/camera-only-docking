@@ -8,6 +8,8 @@ import pytest
 import yaml
 
 from jbl_nodes import aruco_utils as au
+from jbl_nodes.mjpeg_source import parse_setup_paths
+from jbl_nodes.preprocess import DATASET_HW
 from jbl_nodes.sim_world import CameraConfig as SimCameraConfig
 from jbl_nodes.sim_world import Pose2D, SimWorld, load_start_poses, start_pose_to_world
 
@@ -72,12 +74,17 @@ def test_robot_and_sim_cameras_are_explicit():
         robot = yaml.safe_load(f)
     with open(os.path.join(CONFIG, "sim.yaml")) as f:
         sim = yaml.safe_load(f)
-    # The robot: a stock Raspberry Pi Camera v2 lens (62.2 deg), read through Argus in the
-    # full-sensor 4:3 mode (not a cropped 16:9 one) and scaled to 640x480.
+    # The robot: the ESP32-CAM's stream at the dataset's own size, asked for on every connection
+    # because the camera boots at VGA. Its lens is unmeasured: 62.2 deg is the placeholder until
+    # PROTOCOL section 5 measures it.
     assert robot["/**"]["ros__parameters"]["hfov_rad"] == pytest.approx(math.radians(62.2), abs=1e-3)
-    device = robot["camera_node"]["ros__parameters"]["device"]
-    assert device.startswith("nvarguscamerasrc") and "width=1640,height=1232" in device
-    assert "width=640,height=480" in device and "appsink" in device
+    camera = robot["camera_node"]["ros__parameters"]
+    assert camera["device"].startswith("http://") and camera["device"].endswith("/stream")
+    assert (camera["height"], camera["width"]) == DATASET_HW == (240, 320)
+    assert "/resolution?size=QVGA" in parse_setup_paths(camera["stream_setup"])
+    # Caps above the camera's own 10 fps: a limiter at its rate would drop frames to jitter.
+    assert "/fps?val=10" in parse_setup_paths(camera["stream_setup"])
+    assert camera["fps"] > 10.0 and camera["compressed_fps"] > 10.0
     # The simulator: its own lens, stated next to what the judge and the servo assume.
     camera_hfov = sim["fake_robot"]["ros__parameters"]["camera_hfov_rad"]
     assert camera_hfov == sim["/**"]["ros__parameters"]["hfov_rad"] == pytest.approx(SimCameraConfig().hfov)

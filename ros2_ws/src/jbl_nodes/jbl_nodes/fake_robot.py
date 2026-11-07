@@ -31,8 +31,8 @@ Parameters (defaults)
     box_yaw             pi  direction the front face (marker) looks; the room is 4 x 3 m
                             centred on the origin
     camera_hfov_rad 1.396   horizontal field of view of the simulated camera (sim_world.CameraConfig;
-                            the robot's stock Pi Camera v2 lens is 1.0856); config/sim.yaml sets
-                            it next to the hfov_rad the judge and the servo assume
+                            1.0856 is the 62.2 deg evaluation lens); config/sim.yaml sets it next
+                            to the hfov_rad the judge and the servo assume
     rate_hz 50.0   scan_rate 10.0   camera_fps 10.0   ground_truth_rate 10.0   (0 disables a topic)
     jpeg_quality 85     cmd_timeout 0.5 s (0 = hold the last command forever, like the real
                         motor bridge)

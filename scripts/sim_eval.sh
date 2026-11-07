@@ -21,8 +21,8 @@
 #            recorded with the same randomisation, so the images are in distribution.
 #   wide     config/sim_eval_wide_poses.yaml: 10 start poses outside the demonstrations'
 #            distance / lateral / heading box (far, wide, steep, near), otherwise as noise
-#   hfov62   test poses 0-9 with the robot's Pi Camera v2 lens (HFOV 62.2 deg = 1.0856 rad) in
-#            fake_robot; dock_judge and servo_baseline are told the true HFOV (hfov_rad, as
+#   hfov62   test poses 0-9 with the Pi Camera v2 lens first planned for the robot (HFOV 62.2 deg
+#            = 1.0856 rad) in fake_robot; dock_judge and servo_baseline are told the true HFOV (hfov_rad, as
 #            config/robot.yaml does on the robot); BC was trained on 80 deg images and has no
 #            such parameter. Otherwise as noise.
 #

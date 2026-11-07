@@ -1,7 +1,7 @@
 # Host tools in tools/ and their tests (tests/), off-robot, Python 3.12, CPU or CUDA.
 #   uv pip install -r requirements-tools.txt        (or: pip install -r requirements-tools.txt)
 # These versions were installed and tested together (HF_HUB_OFFLINE=1, CPU).
-# The robot side (ROS 2 Foxy, Python 3.8) does not use this file.
+# The robot side (ROS 2 Humble in Docker on the Jetson) does not use this file.
 
 # Dataset format, lerobot-train (ACT). The [dataset] extra brings datasets, pyarrow, pandas<3,
 # PyAV (video encoding) and torchcodec (video decoding); without it LeRobotDataset does not import.

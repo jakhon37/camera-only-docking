@@ -10,16 +10,18 @@ within 10° of the image centre; "Docking geometry and success" below).
 
 | Item | Value |
 |---|---|
-| ROS 2 on the robot | Foxy (Ubuntu 20.04 container, Python 3.8, OpenCV 4.2) on Jetson Nano B01 |
-| Drive | diff drive, wheel separation 0.212 m, radius 0.034 m; `diffdrive_node` subscribes `/cmd_vel` (Twist) |
+| Compute | Jetson Xavier NX dev kit, JetPack 5.1.6 (L4T R35.6.5), TensorRT 8.5.2, CUDA 11.4. The host has Python 3.8 and no ROS |
+| ROS 2 on the robot | Humble in Docker (`auto_ros_humble`, image `auto_ros:humble`: Ubuntu 22.04, Python 3.10, OpenCV 4.5.4, no TensorRT or ONNX Runtime) |
+| Drive | diff drive, wheel separation 0.212 m, radius 0.034 m; `diffdrive_node` subscribes `/cmd_vel` (Twist) and talks to an ESP32-S3 over USB (`/dev/ttyACM0`). Known problems: PROTOCOL, "Before anything drives" |
 | Chassis | 0.194 × 0.178 m. The URDF centres it 0.061 m ahead of base_link, so the front bumper is ≈ 0.158 m ahead of base_link and ≈ 0.094 m ahead of the lidar. `fake_robot` centres it on base_link: bumper 0.097 m ahead of base_link, 0.033 m ahead of the lidar. Measure the real robot |
 | Lidar | RPLidar A1, `/scan` (sensor_msgs/LaserScan), frame `laser_frame` at x=0.064, z=0.161, yaw 0 in URDF, 360 samples, ~5.5–10 Hz, **minimum range 0.15 m**: closer returns come back as 0, inf or below `range_min` and mean "too close / unknown"; rplidar_ros also reports empty 1° bins as inf, so scattered invalid beams are normal |
-| Camera | Raspberry Pi Camera v2 (CSI, IMX219), stock lens **HFOV 62.2° (1.0856 rad)**, published at 640×480, mounted at the front (URDF x = 0.1455, z ≈ 0.05 m above the chassis). V4L2 exposes only raw RG10 Bayer, which OpenCV cannot read: capture through `nvarguscamerasrc` in the full-sensor 1640×1232 mode (needs the container started with `--runtime nvidia -v /tmp/argus_socket:/tmp/argus_socket`; `config/robot.yaml`). `fake_robot`'s simulated camera is 80° (1.396 rad, parameter `camera_hfov_rad`) |
-| Existing camera node | `jetson_bot_detection/camera_go.py` publishes raw `camera/image_raw` bgr8 at 30 Hz **with no header stamp**; it is replaced by `jbl_nodes/camera_node` for this project |
+| Camera | AI-Thinker ESP32-CAM (OV2640) on Wi-Fi, firmware [myESP32CAM-BLACKBOX](https://github.com/jakhon37/myESP32CAM-BLACKBOX): MJPEG over HTTP, one client at a time, no timestamps, at most 10 fps by default, boots at 640×480 and forgets its size on reboot. Published at 320×240. Lens unmeasured: `hfov_rad` **1.0856 rad (62.2°) is a placeholder** (PROTOCOL section 5). The URDF's camera position (x = 0.1455) was for an earlier camera; measure the real mount. `fake_robot`'s simulated camera is 80° (1.396 rad, parameter `camera_hfov_rad`) |
+| Existing camera node | `jetson_bot_detection/camera_go.py` publishes raw `camera/image_raw` bgr8 at 30 Hz **with no header stamp**; it is replaced by `jbl_nodes/camera_node` for this project. The robot's own launch starts no camera node |
 
 ## Compatibility rules
 
 - ROS 2 packages build and pass tests on **Foxy, Humble and Jazzy** (`scripts/docker_test.sh`).
+  The robot runs Humble; Foxy and Jazzy keep the simulation results reproducible.
 - ROS Python nodes: **Python 3.8 compatible** (no `X | Y` unions, no `match`, no `list[int]` at
   runtime; use `typing`). Depend only on rclpy, std/sensor/geometry/nav msgs, numpy, OpenCV.
   **No cv_bridge** (not in the base images); convert `sensor_msgs/Image` with numpy.
@@ -33,8 +35,8 @@ within 10° of the image centre; "Docking geometry and success" below).
 
 | Topic | Type | Producer | Notes |
 |---|---|---|---|
-| `/camera/image_raw` | sensor_msgs/Image, `bgr8`, 640×480 | `camera_node` | header.stamp = capture time, frame_id `camera_link`; default 30 Hz |
-| `/camera/image_raw/compressed` | sensor_msgs/CompressedImage, `jpeg` | `camera_node` | same stamp; default 15 Hz, quality 85. **This is what gets recorded** |
+| `/camera/image_raw` | sensor_msgs/Image, `bgr8`, `width`×`height` (robot 320×240, node default 640×480) | `camera_node` | header.stamp = capture time, frame_id `camera_link`; capped at `fps`, so on the robot up to the camera's 10 Hz. For the ESP32-CAM the capture time is estimated as the arrival of the frame's part boundary (`mjpeg_source.py`) |
+| `/camera/image_raw/compressed` | sensor_msgs/CompressedImage, `jpeg` | `camera_node` | same stamp; capped at `compressed_fps` (15 Hz), quality 85. **This is what gets recorded** |
 | `/scan` | sensor_msgs/LaserScan | rplidar_ros | forward direction = angle `forward_angle` (param, default 0.0 rad) |
 | `/odom` | nav_msgs/Odometry | diffdrive_node | measured v (twist.linear.x) and w (twist.angular.z) |
 | `/cmd_vel_in` | geometry_msgs/Twist | teleop (keyboard remapped, or the web GUI with its Command Velocity topic set to `/cmd_vel_in`) **or** `policy_runner` **or** `servo_baseline` | requested motion; only one source active at a time. Also read by `dock_judge` ("stopped") |
@@ -105,8 +107,8 @@ and `diffdrive_node` has no command watchdog, so the motor-side timeout must be 
 - **Fail** = 30 s timeout, an operator intervention, or `safety_gate` state `stop_obstacle`
   for > 2 s while the marker is not aligned (pushed into the wall).
 - Bearing = horizontal angle of the marker centre from the image centre using the pinhole
-  model with HFOV `hfov_rad`: 1.0856 rad on the robot (`config/robot.yaml`, stock Pi Camera v2
-  lens; calibrate it, PROTOCOL section 5), 1.396 rad in simulation (`config/sim.yaml`, equal to
+  model with HFOV `hfov_rad`: 1.0856 rad on the robot (`config/robot.yaml`, a placeholder until
+  it is calibrated, PROTOCOL section 5), 1.396 rad in simulation (`config/sim.yaml`, equal to
   `fake_robot`'s `camera_hfov_rad`).
 
 Stop parameters (`config/sim.yaml` and `config/robot.yaml` set the two marked * explicitly):
@@ -123,7 +125,7 @@ Stop parameters (`config/sim.yaml` and `config/robot.yaml` set the two marked * 
 
 | Feature | dtype / shape | Source |
 |---|---|---|
-| `observation.images.front` | video, 3×240×320 (H×W), RGB | `/camera/image_raw/compressed`, resized from 640×480 |
+| `observation.images.front` | video, 3×240×320 (H×W), RGB | `/camera/image_raw/compressed`; the robot publishes this size, the simulator's 640×480 is resized |
 | `observation.state` | float32[2] | `/odom` twist (v, w), latest at each tick |
 | `action` | float32[2] | `/cmd_vel_in` (v, w), latest operator command at each tick (zero if older than 0.3 s) |
 
@@ -134,7 +136,7 @@ Stop parameters (`config/sim.yaml` and `config/robot.yaml` set the two marked * 
   are dropped (`--keep-idle-start` keeps them).
 - Per-episode metadata saved alongside (`meta/jbl_episodes.jsonl`): `bag`, `pose_id`, `round`,
   `method`, `outcome`, `duration_s`, `idle_start_s` (the dropped idle start).
-- Works for Foxy bags (sqlite3, `.db3`) and Jazzy bags (mcap) via the `rosbags` Python package.
+- Works for Foxy and Humble bags (sqlite3, `.db3`) and Jazzy bags (mcap) via the `rosbags` Python package.
 
 ## Policy I/O (BC and ACT; exported to ONNX)
 
@@ -144,7 +146,9 @@ Stop parameters (`config/sim.yaml` and `config/robot.yaml` set the two marked * 
   v = a0 × 0.25 m/s, w = a1 × 1.5 rad/s, then clipped. Stored in `policy_meta.json` beside the
   ONNX file together with input size, normalisation and dataset stats.
 - `policy_runner` publishes `/cmd_vel_in` at 10 Hz from the latest image, and one
-  `/policy/latency` message per inference. On a tick whose newest image is missing or older
+  `/policy/latency` message per inference. Images are aged by header.stamp here, but
+  `dock_judge` and `servo_baseline` age them by arrival (limit 0.5 s), so they accept a frame
+  that was held up on the way. On a tick whose newest image is missing or older
   than 0.2 s, or after an inference error, it publishes exactly (0, 0) instead (a fallback
   zero) and no latency message. A tick that overruns the 100 ms period is followed at once by
   another (the timer catches up), which is a fallback zero when the newest image is by then

@@ -9,22 +9,23 @@
 /**:
   ros__parameters:
     forward_angle: 0.0   # /scan angle that points straight ahead (URDF yaw 0; may be pi)
-    hfov_rad: 1.0856     # stock Raspberry Pi Camera v2 lens, 62.2 deg; measure it (PROTOCOL section 5)
+    hfov_rad: 1.0856     # 62.2 deg is a placeholder: the ESP32-CAM's lens is unmeasured (PROTOCOL section 5)
 
 camera_node:
   ros__parameters:
     source: camera
-    # OpenCV device index, path or GStreamer pipeline. The Pi Camera v2 on the Nano's CSI port
-    # is read through Argus (/dev/video0 is raw RG10 Bayer, which OpenCV cannot use); that needs
-    # the container started with --runtime nvidia -v /tmp/argus_socket:/tmp/argus_socket
-    # (docs/PROTOCOL.md section 4). 1640x1232 is the IMX219's full-sensor 4:3 mode: its
-    # 1280x720 and 1920x1080 sensor modes are centre crops, with a narrower HFOV and a VFOV too
-    # small to see the 10 cm marker when docked. A USB camera: device: "0".
-    device: "nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM),width=1640,height=1232,framerate=30/1 ! nvvidconv ! video/x-raw,width=640,height=480,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink drop=true max-buffers=1"
-    width: 640
-    height: 480
-    fps: 30.0
-    compressed_fps: 15.0  # the recorded stream (about 2 GB per hour of bag)
+    # The ESP32-CAM on Wi-Fi (docs/PROTOCOL.md section 4). Its address comes from the router, so
+    # check it if nothing connects. It serves one client at a time: a browser open on the stream
+    # blocks this node. A USB camera on the Jetson instead: device: "0", and no stream_setup.
+    device: "http://192.168.219.118/stream"
+    # Sent before every connection, because the camera forgets both when it reboots. size must
+    # agree with width and height below (QVGA = 320x240, VGA = 640x480); 10 is the firmware's default.
+    stream_setup: "/resolution?size=QVGA,/fps?val=10"
+    stream_timeout_s: 2.0
+    width: 320   # the dataset's own size; 640x480 is about 2.5 times the bytes per frame
+    height: 240
+    fps: 15.0             # both rates are caps, above the camera's 10 fps: every frame goes through
+    compressed_fps: 15.0  # the recorded stream
     jpeg_quality: 85
     frame_id: camera_link
 
@@ -39,6 +40,7 @@ dock_judge:
 servo_baseline:
   ros__parameters:
     image_topic: /camera/image_raw/compressed
+    # Also set camera_ahead_of_lidar_m once the camera is mounted (PROTOCOL section 5, step 8).
     # Stopped at range <= 0.27 m (target_range + range_tol), drive again only above 0.27 + this
     # (m), so lidar noise cannot toggle the stop (0.0 = the law before v4).
     stop_hysteresis: 0.03
