@@ -25,7 +25,7 @@ onnx==1.23.2
 onnxruntime==1.31.0
 onnxscript==0.7.2
 
-matplotlib==3.11.2   # make_marker.py PDF/PNG, analyze_trials.py chart
+matplotlib==3.11.2   # make_marker.py PDF/PNG, analyze_trials.py chart, make_figures.py
 pillow==12.3.0
 scipy==1.18.1        # stats.py (normal, beta and binomial distributions)
 pyyaml==6.0.3        # make_schedule.py --pose-table

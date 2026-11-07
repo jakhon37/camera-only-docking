@@ -1,0 +1,11 @@
+method,pose_id,round,outcome,duration_s,final_range_m,final_bearing_deg,interventions,notes
+servo,0,1,success,9.026,0.2692,0.00,0,
+servo,1,1,success,14.315,0.2696,-3.64,0,
+servo,2,1,success,14.134,0.2699,3.94,0,
+servo,3,1,success,11.577,0.2697,3.47,0,
+servo,4,1,success,15.303,0.2699,-3.73,0,
+servo,5,1,success,29.280,0.2700,3.28,0,
+servo,6,1,success,19.426,0.2696,3.22,0,
+servo,7,1,success,26.288,0.2696,3.82,0,
+servo,8,1,success,12.808,0.2695,2.92,0,
+servo,9,1,success,18.391,0.2696,3.01,0,
